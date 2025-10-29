@@ -1,55 +1,27 @@
 import express from 'express';
-import pool from '../config/database.js';
+import supabase from '../config/database.js';
 
 const router = express.Router();
 
 // Obtener todos los predios con información del propietario
 router.get('/', async (req, res) => {
   try {
-    const [rows] = await pool.query(`
-      SELECT p.*, 
-             m.numero_matricula as matricula_numero,
-             m.cedula_propietario,
-             CONCAT(u.nombre, ' ', u.apellido) as propietario,
-             u.telefono as telefono_propietario,
-             u.email as email_propietario
-      FROM predio p
-      LEFT JOIN matricula m ON p.matricula = m.numero_matricula
-      LEFT JOIN usuario u ON m.cedula_propietario = u.cedula
-      ORDER BY p.fecha_registro DESC
-    `);
-    res.json(rows);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+    const { data, error } = await supabase
+      .from('predio')
+      .select(`
+        *,
+        propietario:propietario!fk_predio_propietario (
+          cc,
+          nombre,
+          apellido,
+          telefono,
+          correo
+        )
+      `)
+      .order('fecha_registro', { ascending: false });
 
-// Obtener todas las matrículas disponibles
-router.get('/matriculas/lista', async (req, res) => {
-  try {
-    const [rows] = await pool.query(`
-      SELECT matricula, direccion, telefono, email 
-      FROM predio 
-      WHERE matricula IS NOT NULL 
-      ORDER BY matricula ASC
-    `);
-    res.json(rows);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Buscar matrícula por término
-router.get('/matriculas/buscar/:termino', async (req, res) => {
-  try {
-    const termino = `%${req.params.termino}%`;
-    const [rows] = await pool.query(`
-      SELECT matricula, direccion, telefono, email 
-      FROM predio 
-      WHERE matricula LIKE ? OR direccion LIKE ?
-      ORDER BY matricula ASC
-    `, [termino, termino]);
-    res.json(rows);
+    if (error) throw error;
+    res.json(data || []);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -58,11 +30,54 @@ router.get('/matriculas/buscar/:termino', async (req, res) => {
 // Obtener predio por ID
 router.get('/:id', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM predio WHERE id_predio = ?', [req.params.id]);
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Predio no encontrado' });
+    const { data, error } = await supabase
+      .from('predio')
+      .select(`
+        *,
+        propietario:propietario!fk_predio_propietario (
+          cc,
+          nombre,
+          apellido,
+          telefono,
+          correo
+        )
+      `)
+      .eq('id', req.params.id)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Predio no encontrado' });
+      }
+      throw error;
     }
-    res.json(rows[0]);
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Buscar predios por dirección o propietario
+router.get('/buscar/:termino', async (req, res) => {
+  try {
+    const termino = req.params.termino;
+    const { data, error } = await supabase
+      .from('predio')
+      .select(`
+        *,
+        propietario:propietario!fk_predio_propietario (
+          cc,
+          nombre,
+          apellido,
+          telefono,
+          correo
+        )
+      `)
+      .or(`direccion.ilike.%${termino}%,propietario_cc.eq.${termino}`)
+      .order('direccion', { ascending: true });
+
+    if (error) throw error;
+    res.json(data || []);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -71,12 +86,36 @@ router.get('/:id', async (req, res) => {
 // Crear predio
 router.post('/', async (req, res) => {
   try {
-    const { matricula, direccion, telefono, email } = req.body;
-    const [result] = await pool.query(
-      'INSERT INTO predio (matricula, direccion, telefono, email) VALUES (?, ?, ?, ?)',
-      [matricula, direccion, telefono, email]
-    );
-    res.status(201).json({ id_predio: result.insertId, message: 'Predio creado exitosamente' });
+    const { direccion, propietario_cc, telefono, correo, tipo } = req.body;
+    
+    // Verificar que el propietario existe
+    if (propietario_cc) {
+      const { data: propietario, error: propError } = await supabase
+        .from('propietario')
+        .select('cc')
+        .eq('cc', propietario_cc)
+        .single();
+      
+      if (propError || !propietario) {
+        return res.status(404).json({ error: 'Propietario no encontrado' });
+      }
+    }
+    
+    const { data, error } = await supabase
+      .from('predio')
+      .insert([{ 
+        direccion, 
+        propietario_cc, 
+        telefono, 
+        correo, 
+        tipo,
+        fecha_registro: new Date().toISOString().split('T')[0]
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.status(201).json({ id: data.id, message: 'Predio creado exitosamente' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -85,12 +124,29 @@ router.post('/', async (req, res) => {
 // Actualizar predio
 router.put('/:id', async (req, res) => {
   try {
-    const { matricula, direccion, telefono, email } = req.body;
-    const [result] = await pool.query(
-      'UPDATE predio SET matricula = ?, direccion = ?, telefono = ?, email = ? WHERE id_predio = ?',
-      [matricula, direccion, telefono, email, req.params.id]
-    );
-    if (result.affectedRows === 0) {
+    const { direccion, propietario_cc, telefono, correo, tipo } = req.body;
+    
+    // Verificar que el propietario existe si se proporciona
+    if (propietario_cc) {
+      const { data: propietario, error: propError } = await supabase
+        .from('propietario')
+        .select('cc')
+        .eq('cc', propietario_cc)
+        .single();
+      
+      if (propError || !propietario) {
+        return res.status(404).json({ error: 'Propietario no encontrado' });
+      }
+    }
+    
+    const { data, error } = await supabase
+      .from('predio')
+      .update({ direccion, propietario_cc, telefono, correo, tipo })
+      .eq('id', req.params.id)
+      .select();
+
+    if (error) throw error;
+    if (!data || data.length === 0) {
       return res.status(404).json({ error: 'Predio no encontrado' });
     }
     res.json({ message: 'Predio actualizado exitosamente' });

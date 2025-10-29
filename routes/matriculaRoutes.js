@@ -1,58 +1,87 @@
 import express from 'express';
-import pool from '../config/database.js';
+import supabase from '../config/database.js';
 
 const router = express.Router();
 
 // Obtener todas las matrículas
 router.get('/', async (req, res) => {
   try {
-    const [rows] = await pool.query(`
-      SELECT m.*, p.direccion, 
-             u.nombre, u.apellido, u.telefono, u.email
-      FROM matricula m
-      JOIN predio p ON m.id_predio = p.id_predio
-      JOIN usuario u ON m.cedula_propietario = u.cedula
-      ORDER BY m.fecha_creacion DESC
-    `);
-    res.json(rows);
+    const { data, error } = await supabase
+      .from('matricula')
+      .select(`
+        *,
+        predio:predio!fk_matricula_predio (
+          id,
+          direccion,
+          telefono,
+          correo,
+          tipo,
+          propietario:propietario!fk_predio_propietario (
+            cc,
+            nombre,
+            apellido,
+            telefono,
+            correo
+          )
+        )
+      `)
+      .order('fecha', { ascending: false });
+
+    if (error) throw error;
+    res.json(data || []);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Obtener matrícula por número
-router.get('/numero/:numero', async (req, res) => {
+// Obtener matrícula por código
+router.get('/:codigo', async (req, res) => {
   try {
-    const [rows] = await pool.query(`
-      SELECT m.*, p.direccion, p.telefono as telefono_predio, p.email as email_predio,
-             u.cedula, u.nombre, u.apellido, u.telefono, u.email, u.direccion as direccion_usuario
-      FROM matricula m
-      JOIN predio p ON m.id_predio = p.id_predio
-      JOIN usuario u ON m.cedula_propietario = u.cedula
-      WHERE m.numero_matricula = ?
-    `, [req.params.numero]);
-    
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Matrícula no encontrada' });
+    const { data, error } = await supabase
+      .from('matricula')
+      .select(`
+        *,
+        predio:predio!fk_matricula_predio (
+          id,
+          direccion,
+          telefono,
+          correo,
+          tipo,
+          propietario:propietario!fk_predio_propietario (
+            cc,
+            nombre,
+            apellido,
+            telefono,
+            correo
+          )
+        )
+      `)
+      .eq('cod_matricula', req.params.codigo)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Matrícula no encontrada' });
+      }
+      throw error;
     }
-    res.json(rows[0]);
+    res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Obtener matrículas por cédula de usuario
-router.get('/usuario/:cedula', async (req, res) => {
+// Obtener matrículas por predio
+router.get('/predio/:id', async (req, res) => {
   try {
-    const [rows] = await pool.query(`
-      SELECT m.*, p.direccion
-      FROM matricula m
-      JOIN predio p ON m.id_predio = p.id_predio
-      WHERE m.cedula_propietario = ?
-      ORDER BY m.fecha_creacion DESC
-    `, [req.params.cedula]);
-    
-    res.json(rows);
+    const { data, error } = await supabase
+      .from('matricula')
+      .select('*')
+      .eq('id_predio', req.params.id)
+      .order('fecha', { ascending: false });
+
+    if (error) throw error;
+    res.json(data || []);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -61,53 +90,62 @@ router.get('/usuario/:cedula', async (req, res) => {
 // Crear matrícula
 router.post('/', async (req, res) => {
   try {
-    const { numero_matricula, id_predio, cedula_propietario, observaciones } = req.body;
+    const { cod_matricula, id_predio, estado } = req.body;
     
     // Verificar que el predio existe
-    const [predio] = await pool.query('SELECT * FROM predio WHERE id_predio = ?', [id_predio]);
-    if (predio.length === 0) {
+    const { data: predio, error: predioError } = await supabase
+      .from('predio')
+      .select('id')
+      .eq('id', id_predio)
+      .single();
+    
+    if (predioError || !predio) {
       return res.status(404).json({ error: 'Predio no encontrado' });
     }
     
-    // Verificar que el usuario existe
-    const [usuario] = await pool.query('SELECT * FROM usuario WHERE cedula = ?', [cedula_propietario]);
-    if (usuario.length === 0) {
-      return res.status(404).json({ error: 'Usuario no encontrado' });
+    // Verificar que no exista una matrícula con el mismo código
+    const { data: matriculaExistente } = await supabase
+      .from('matricula')
+      .select('cod_matricula')
+      .eq('cod_matricula', cod_matricula)
+      .single();
+    
+    if (matriculaExistente) {
+      return res.status(400).json({ error: 'Ya existe una matrícula con ese código' });
     }
     
-    // Verificar que el predio no tenga una matrícula activa
-    const [matriculaExistente] = await pool.query(
-      'SELECT * FROM matricula WHERE id_predio = ? AND estado = "activa"',
-      [id_predio]
-    );
-    if (matriculaExistente.length > 0) {
-      return res.status(400).json({ error: 'El predio ya tiene una matrícula activa' });
-    }
-    
-    await pool.query(
-      'INSERT INTO matricula (numero_matricula, id_predio, cedula_propietario, observaciones) VALUES (?, ?, ?, ?)',
-      [numero_matricula, id_predio, cedula_propietario, observaciones]
-    );
-    
-    res.status(201).json({ numero_matricula, message: 'Matrícula creada exitosamente' });
+    const { data, error } = await supabase
+      .from('matricula')
+      .insert([{
+        cod_matricula,
+        id_predio,
+        estado: estado || 'Activa',
+        fecha: new Date().toISOString().split('T')[0]
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.status(201).json({ cod_matricula: data.cod_matricula, message: 'Matrícula creada exitosamente' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
 // Actualizar estado de matrícula
-router.put('/:numero/estado', async (req, res) => {
+router.put('/:codigo/estado', async (req, res) => {
   try {
     const { estado } = req.body;
-    const [result] = await pool.query(
-      'UPDATE matricula SET estado = ? WHERE numero_matricula = ?',
-      [estado, req.params.numero]
-    );
-    
-    if (result.affectedRows === 0) {
+    const { data, error } = await supabase
+      .from('matricula')
+      .update({ estado })
+      .eq('cod_matricula', req.params.codigo)
+      .select();
+
+    if (error) throw error;
+    if (!data || data.length === 0) {
       return res.status(404).json({ error: 'Matrícula no encontrada' });
     }
-    
     res.json({ message: 'Estado de matrícula actualizado' });
   } catch (error) {
     res.status(500).json({ error: error.message });

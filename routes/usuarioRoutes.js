@@ -1,50 +1,79 @@
 import express from 'express';
-import pool from '../config/database.js';
+import supabase from '../config/database.js';
 
 const router = express.Router();
 
+// Obtener todos los usuarios
 router.get('/', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM usuario');
-    res.json(rows);
+    const { data, error } = await supabase
+      .from('usuario')
+      .select('*');
+
+    if (error) throw error;
+    res.json(data || []);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-router.get('/:cedula', async (req, res) => {
+// Obtener usuario por CC
+router.get('/:cc', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM usuario WHERE cedula = ?', [req.params.cedula]);
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Usuario no encontrado' });
+    const { data, error } = await supabase
+      .from('usuario')
+      .select('*')
+      .eq('cc', req.params.cc)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Usuario no encontrado' });
+      }
+      throw error;
     }
-    res.json(rows[0]);
+    res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
+// Crear usuario
 router.post('/', async (req, res) => {
   try {
-    const { cedula, nombre, apellido, telefono, email, direccion, tipo_usuario } = req.body;
-    await pool.query(
-      'INSERT INTO usuario (cedula, nombre, apellido, telefono, email, direccion, tipo_usuario) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [cedula, nombre, apellido, telefono, email, direccion, tipo_usuario]
-    );
-    res.status(201).json({ cedula, message: 'Usuario creado exitosamente' });
+    const { cc, nombre, apellido, telefono, correo } = req.body;
+    const { data, error } = await supabase
+      .from('usuario')
+      .insert([{ 
+        cc, 
+        nombre, 
+        apellido, 
+        telefono, 
+        correo,
+        fecha_registro: new Date().toISOString().split('T')[0]
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.status(201).json({ cc: data.cc, message: 'Usuario creado exitosamente' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-router.put('/:cedula', async (req, res) => {
+// Actualizar usuario
+router.put('/:cc', async (req, res) => {
   try {
-    const { nombre, apellido, telefono, email, direccion, tipo_usuario, activo } = req.body;
-    const [result] = await pool.query(
-      'UPDATE usuario SET nombre = ?, apellido = ?, telefono = ?, email = ?, direccion = ?, tipo_usuario = ?, activo = ? WHERE cedula = ?',
-      [nombre, apellido, telefono, email, direccion, tipo_usuario, activo, req.params.cedula]
-    );
-    if (result.affectedRows === 0) {
+    const { nombre, apellido, telefono, correo } = req.body;
+    const { data, error } = await supabase
+      .from('usuario')
+      .update({ nombre, apellido, telefono, correo })
+      .eq('cc', req.params.cc)
+      .select();
+
+    if (error) throw error;
+    if (!data || data.length === 0) {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
     res.json({ message: 'Usuario actualizado exitosamente' });

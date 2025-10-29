@@ -1,17 +1,15 @@
-import mysql from 'mysql2/promise';
+import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'mantenimiento_fontaneria',
-  port: process.env.DB_PORT || 3306,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-});
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_ANON_KEY;
 
-export default pool;
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error('SUPABASE_URL y SUPABASE_ANON_KEY deben estar definidos en el archivo .env');
+}
+
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+export default supabase;
