@@ -15,8 +15,23 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Logging middleware
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  next();
+});
+
 app.use(cors());
 app.use(express.json());
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Error:', err);
+  res.status(500).json({ 
+    error: err.message,
+    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+  });
+});
 
 // Rutas
 app.use('/api/predios', predioRoutes);
@@ -27,6 +42,19 @@ app.use('/api/solicitudes', solicitudRoutes);
 app.use('/api/mantenimientos', mantenimientoRoutes);
 app.use('/api/facturas', facturaRoutes);
 app.use('/api/pagos', pagoRoutes);
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    env: {
+      nodeEnv: process.env.NODE_ENV,
+      port: PORT,
+      supabaseConfigured: !!(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY)
+    }
+  });
+});
 
 app.get('/', (req, res) => {
   res.json({ 
