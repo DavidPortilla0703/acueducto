@@ -138,29 +138,29 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const { cod_matricula, id_mantenimiento, observaciones, prioridad } = req.body;
-    
+
     // Verificar que la matrícula existe
     const { data: matricula, error: matriculaError } = await supabase
       .from('matricula')
       .select('cod_matricula')
       .eq('cod_matricula', cod_matricula)
       .single();
-    
+
     if (matriculaError || !matricula) {
       return res.status(404).json({ error: 'Matrícula no encontrada' });
     }
-    
+
     // Verificar que el mantenimiento existe
     const { data: mantenimiento, error: mantError } = await supabase
       .from('mantenimiento')
       .select('id')
       .eq('id', id_mantenimiento)
       .single();
-    
+
     if (mantError || !mantenimiento) {
       return res.status(404).json({ error: 'Tipo de mantenimiento no encontrado' });
     }
-    
+
     const { data, error } = await supabase
       .from('solicitud_mantenimiento')
       .insert([{
@@ -172,7 +172,7 @@ router.post('/', async (req, res) => {
       }])
       .select()
       .single();
-    
+
     if (error) throw error;
     res.status(201).json({ id: data.id, message: 'Solicitud creada exitosamente' });
   } catch (error) {
@@ -189,7 +189,7 @@ router.put('/:id/estado', async (req, res) => {
       .update({ estado })
       .eq('id', req.params.id)
       .select();
-    
+
     if (error) throw error;
     if (!data || data.length === 0) {
       return res.status(404).json({ error: 'Solicitud no encontrada' });
