@@ -81,4 +81,23 @@ router.put('/:id', async (req, res) => {
   }
 });
 
+// Eliminar mantenimiento
+router.delete('/:id', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('mantenimiento')
+      .delete()
+      .eq('id', req.params.id)
+      .select();
+
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: 'Mantenimiento no encontrado' });
+    }
+    res.json({ message: 'Mantenimiento eliminado exitosamente' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;
