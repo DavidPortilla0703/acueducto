@@ -40,6 +40,53 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Actualizar facturas vencidas a estado "en_mora"
+// IMPORTANTE: Esta ruta debe estar ANTES de /:id para evitar conflictos
+router.post('/actualizar-mora', async (req, res) => {
+  try {
+    const fecha_actual = new Date().toISOString().split('T')[0];
+
+    // Buscar facturas vencidas que no estén pagadas
+    const { data: facturasVencidas, error: errorBusqueda } = await supabase
+      .from('factura')
+      .select('id, cod_matricula, fecha_vencimiento, valor')
+      .in('estado', ['Pendiente', 'Vencida'])
+      .lt('fecha_vencimiento', fecha_actual);
+
+    if (errorBusqueda) throw errorBusqueda;
+
+    if (!facturasVencidas || facturasVencidas.length === 0) {
+      return res.json({
+        message: 'No hay facturas vencidas para actualizar',
+        facturas_actualizadas: 0
+      });
+    }
+
+    // Actualizar estado a "en_mora"
+    const facturasActualizadas = [];
+
+    for (const factura of facturasVencidas) {
+      const { error: errorActualizar } = await supabase
+        .from('factura')
+        .update({ estado: 'en_mora' })
+        .eq('id', factura.id);
+
+      if (!errorActualizar) {
+        facturasActualizadas.push(factura.id);
+      }
+    }
+
+    res.json({
+      message: 'Facturas actualizadas a estado en mora',
+      facturas_actualizadas: facturasActualizadas.length,
+      ids: facturasActualizadas
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Obtener factura por ID
 router.get('/:id', async (req, res) => {
   try {
@@ -206,52 +253,6 @@ router.post('/:id/pago', async (req, res) => {
     }
 
     res.status(201).json({ message: 'Pago registrado exitosamente' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Actualizar facturas vencidas a estado "en_mora"
-router.post('/actualizar-mora', async (req, res) => {
-  try {
-    const fecha_actual = new Date().toISOString().split('T')[0];
-
-    // Buscar facturas vencidas que no estén pagadas
-    const { data: facturasVencidas, error: errorBusqueda } = await supabase
-      .from('factura')
-      .select('id, cod_matricula, fecha_vencimiento, valor')
-      .in('estado', ['Pendiente', 'Vencida'])
-      .lt('fecha_vencimiento', fecha_actual);
-
-    if (errorBusqueda) throw errorBusqueda;
-
-    if (!facturasVencidas || facturasVencidas.length === 0) {
-      return res.json({
-        message: 'No hay facturas vencidas para actualizar',
-        facturas_actualizadas: 0
-      });
-    }
-
-    // Actualizar estado a "en_mora"
-    const facturasActualizadas = [];
-
-    for (const factura of facturasVencidas) {
-      const { error: errorActualizar } = await supabase
-        .from('factura')
-        .update({ estado: 'en_mora' })
-        .eq('id', factura.id);
-
-      if (!errorActualizar) {
-        facturasActualizadas.push(factura.id);
-      }
-    }
-
-    res.json({
-      message: 'Facturas actualizadas a estado en mora',
-      facturas_actualizadas: facturasActualizadas.length,
-      ids: facturasActualizadas
-    });
-
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
