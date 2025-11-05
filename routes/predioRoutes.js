@@ -136,6 +136,7 @@ router.put('/:id', async (req, res) => {
     if (predioError || !predioExistente) {
       return res.status(404).json({ error: 'Predio no encontrado' });
     }
+h
 
     // Verificar que el propietario existe si se proporciona
     if (propietario_cc) {
