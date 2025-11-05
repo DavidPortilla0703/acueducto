@@ -8,7 +8,7 @@ router.get('/', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('solicitud_mantenimiento')
-      .select('*, created_at')
+      .select('*')
       .order('id', { ascending: false });
 
     if (error) throw error;
@@ -168,7 +168,8 @@ router.post('/', async (req, res) => {
         id_mantenimiento,
         estado: 'Pendiente',
         observaciones,
-        prioridad: prioridad || 'Media'
+        prioridad: prioridad || 'Media',
+        fecha_solicitud: new Date().toISOString().split('T')[0]
       }])
       .select()
       .single();
