@@ -8,7 +8,7 @@ router.get('/', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('solicitud_mantenimiento')
-      .select('*')
+      .select('*, created_at')
       .order('id', { ascending: false });
 
     if (error) throw error;

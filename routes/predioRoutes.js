@@ -87,7 +87,7 @@ router.get('/buscar/:termino', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const { direccion, propietario_cc, telefono, correo, tipo } = req.body;
-    
+
     // Verificar que el propietario existe
     if (propietario_cc) {
       const { data: propietario, error: propError } = await supabase
@@ -95,19 +95,19 @@ router.post('/', async (req, res) => {
         .select('cc')
         .eq('cc', propietario_cc)
         .single();
-      
+
       if (propError || !propietario) {
         return res.status(404).json({ error: 'Propietario no encontrado' });
       }
     }
-    
+
     const { data, error } = await supabase
       .from('predio')
-      .insert([{ 
-        direccion, 
-        propietario_cc, 
-        telefono, 
-        correo, 
+      .insert([{
+        direccion,
+        propietario_cc,
+        telefono,
+        correo,
         tipo,
         fecha_registro: new Date().toISOString().split('T')[0]
       }])
@@ -121,11 +121,22 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Actualizar predio
+// Actualizar predio (la matrícula NO se puede editar)
 router.put('/:id', async (req, res) => {
   try {
     const { direccion, propietario_cc, telefono, correo, tipo } = req.body;
-    
+
+    // Verificar que el predio existe
+    const { data: predioExistente, error: predioError } = await supabase
+      .from('predio')
+      .select('id')
+      .eq('id', req.params.id)
+      .single();
+
+    if (predioError || !predioExistente) {
+      return res.status(404).json({ error: 'Predio no encontrado' });
+    }
+
     // Verificar que el propietario existe si se proporciona
     if (propietario_cc) {
       const { data: propietario, error: propError } = await supabase
@@ -133,12 +144,13 @@ router.put('/:id', async (req, res) => {
         .select('cc')
         .eq('cc', propietario_cc)
         .single();
-      
+
       if (propError || !propietario) {
         return res.status(404).json({ error: 'Propietario no encontrado' });
       }
     }
-    
+
+    // Actualizar solo los campos permitidos (NO incluye matrícula)
     const { data, error } = await supabase
       .from('predio')
       .update({ direccion, propietario_cc, telefono, correo, tipo })
@@ -146,10 +158,7 @@ router.put('/:id', async (req, res) => {
       .select();
 
     if (error) throw error;
-    if (!data || data.length === 0) {
-      return res.status(404).json({ error: 'Predio no encontrado' });
-    }
-    res.json({ message: 'Predio actualizado exitosamente' });
+    res.json({ message: 'Predio actualizado exitosamente', data: data[0] });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
