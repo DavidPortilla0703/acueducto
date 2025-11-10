@@ -132,6 +132,48 @@ router.post('/', async (req, res) => {
   }
 });
 
+// Actualizar matrícula completa
+router.put('/:codigo', async (req, res) => {
+  try {
+    const { id_predio, estado } = req.body;
+
+    // Verificar que la matrícula existe
+    const { data: matriculaExistente, error: matriculaError } = await supabase
+      .from('matricula')
+      .select('cod_matricula')
+      .eq('cod_matricula', req.params.codigo)
+      .single();
+
+    if (matriculaError || !matriculaExistente) {
+      return res.status(404).json({ error: 'Matrícula no encontrada' });
+    }
+
+    // Verificar que el predio existe si se proporciona
+    if (id_predio) {
+      const { data: predio, error: predioError } = await supabase
+        .from('predio')
+        .select('id')
+        .eq('id', id_predio)
+        .single();
+
+      if (predioError || !predio) {
+        return res.status(404).json({ error: 'Predio no encontrado' });
+      }
+    }
+
+    const { data, error } = await supabase
+      .from('matricula')
+      .update({ id_predio, estado })
+      .eq('cod_matricula', req.params.codigo)
+      .select();
+
+    if (error) throw error;
+    res.json({ message: 'Matrícula actualizada exitosamente', data: data[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Actualizar estado de matrícula
 router.put('/:codigo/estado', async (req, res) => {
   try {
@@ -147,6 +189,33 @@ router.put('/:codigo/estado', async (req, res) => {
       return res.status(404).json({ error: 'Matrícula no encontrada' });
     }
     res.json({ message: 'Estado de matrícula actualizado' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Eliminar matrícula
+router.delete('/:codigo', async (req, res) => {
+  try {
+    // Verificar que la matrícula existe
+    const { data: matriculaExistente, error: matriculaError } = await supabase
+      .from('matricula')
+      .select('cod_matricula')
+      .eq('cod_matricula', req.params.codigo)
+      .single();
+
+    if (matriculaError || !matriculaExistente) {
+      return res.status(404).json({ error: 'Matrícula no encontrada' });
+    }
+
+    // Eliminar la matrícula
+    const { error } = await supabase
+      .from('matricula')
+      .delete()
+      .eq('cod_matricula', req.params.codigo);
+
+    if (error) throw error;
+    res.json({ message: 'Matrícula eliminada exitosamente' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

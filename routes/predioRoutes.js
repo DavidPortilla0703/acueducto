@@ -121,7 +121,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Actualizar predio (la matrícula NO se puede editar)
+// Actualizar predio
 router.put('/:id', async (req, res) => {
   try {
     const { direccion, propietario_cc, telefono, correo, tipo } = req.body;
@@ -136,7 +136,6 @@ router.put('/:id', async (req, res) => {
     if (predioError || !predioExistente) {
       return res.status(404).json({ error: 'Predio no encontrado' });
     }
-h
 
     // Verificar que el propietario existe si se proporciona
     if (propietario_cc) {
@@ -151,7 +150,7 @@ h
       }
     }
 
-    // Actualizar solo los campos permitidos (NO incluye matrícula)
+    // Actualizar solo los campos permitidos
     const { data, error } = await supabase
       .from('predio')
       .update({ direccion, propietario_cc, telefono, correo, tipo })
@@ -160,6 +159,46 @@ h
 
     if (error) throw error;
     res.json({ message: 'Predio actualizado exitosamente', data: data[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Eliminar predio
+router.delete('/:id', async (req, res) => {
+  try {
+    // Verificar que el predio existe
+    const { data: predioExistente, error: predioError } = await supabase
+      .from('predio')
+      .select('id')
+      .eq('id', req.params.id)
+      .single();
+
+    if (predioError || !predioExistente) {
+      return res.status(404).json({ error: 'Predio no encontrado' });
+    }
+
+    // Verificar si tiene matrículas asociadas
+    const { data: matriculas } = await supabase
+      .from('matricula')
+      .select('cod_matricula')
+      .eq('id_predio', req.params.id);
+
+    if (matriculas && matriculas.length > 0) {
+      return res.status(400).json({ 
+        error: 'No se puede eliminar el predio porque tiene matrículas asociadas',
+        matriculas: matriculas.length
+      });
+    }
+
+    // Eliminar el predio
+    const { error } = await supabase
+      .from('predio')
+      .delete()
+      .eq('id', req.params.id);
+
+    if (error) throw error;
+    res.json({ message: 'Predio eliminado exitosamente' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
