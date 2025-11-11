@@ -407,7 +407,8 @@ router.post('/generar-masivo', async (req, res) => {
           continue;
         }
 
-        // Buscar facturas vencidas y no pagadas (mora acumulada)
+        // Buscar facturas pendientes anteriores (no pagadas)
+        // La mora es acumulativa: suma de todas las facturas pendientes + multa por cada una
         const { data: facturasEnMora } = await supabase
           .from('factura')
           .select('id, valor, periodo_facturacion, fecha_vencimiento')
@@ -417,20 +418,24 @@ router.post('/generar-masivo', async (req, res) => {
 
         let valor_mora_acumulado = 0;
         let valor_multas = 0;
-        let observaciones_mora = '';
+        let detalle_mora = [];
         const MULTA_POR_MORA = 5000; // Multa fija por cada factura en mora
 
-        // Calcular mora como suma acumulada de facturas no pagadas + multa
         if (facturasEnMora && facturasEnMora.length > 0) {
+          // La mora es la suma de todas las facturas pendientes + multa por cada una
           facturasEnMora.forEach(facturaMora => {
             const valor_factura = parseFloat(facturaMora.valor);
             valor_mora_acumulado += valor_factura;
-            valor_multas += MULTA_POR_MORA; // Agregar multa por cada factura en mora
+            valor_multas += MULTA_POR_MORA; // Agregar multa de $5,000 por cada factura en mora
             
-            observaciones_mora += `Periodo ${facturaMora.periodo_facturacion}: $${valor_factura.toLocaleString('es-CO')} + Multa: $${MULTA_POR_MORA.toLocaleString('es-CO')}. `;
+            detalle_mora.push({
+              periodo: facturaMora.periodo_facturacion,
+              valor: valor_factura,
+              multa: MULTA_POR_MORA
+            });
           });
 
-          // Actualizar estado de facturas en mora
+          // Actualizar estado de facturas en mora a "en_mora"
           for (const facturaMora of facturasEnMora) {
             await supabase
               .from('factura')
@@ -439,7 +444,7 @@ router.post('/generar-masivo', async (req, res) => {
           }
         }
 
-        // Valor total = valor fijo base + mora acumulada + multas
+        // El valor total es: valor_base (fijo para todos) + mora acumulada + multas
         const valor_total = parseFloat(valor_base) + valor_mora_acumulado + valor_multas;
 
         // Crear nueva factura
@@ -453,8 +458,8 @@ router.post('/generar-masivo', async (req, res) => {
             valor: valor_total,
             estado: 'Pendiente',
             url: `facturas/${matricula.cod_matricula}_${periodo_facturacion}.pdf`,
-            observaciones: valor_mora_acumulado > 0 
-              ? `Incluye mora acumulada: $${valor_mora_acumulado.toLocaleString('es-CO')} + Multas: $${valor_multas.toLocaleString('es-CO')} (${facturasEnMora.length} factura(s) x $${MULTA_POR_MORA.toLocaleString('es-CO')}). Detalle: ${observaciones_mora}` 
+            observaciones: valor_mora_acumulado > 0
+              ? `Incluye mora acumulada: $${valor_mora_acumulado.toFixed(2)} + Multas: $${valor_multas.toFixed(2)} (${detalle_mora.length} factura(s) x $5,000). Detalle: ${detalle_mora.map(d => `${d.periodo}: $${d.valor} + Multa: $${d.multa}`).join(', ')}`
               : null
           }])
           .select()
@@ -469,7 +474,8 @@ router.post('/generar-masivo', async (req, res) => {
           valor_mora: valor_mora_acumulado,
           valor_multas: valor_multas,
           valor_total: valor_total,
-          facturas_en_mora: facturasEnMora ? facturasEnMora.length : 0
+          facturas_en_mora: facturasEnMora ? facturasEnMora.length : 0,
+          detalle_mora: detalle_mora
         });
 
       } catch (error) {
