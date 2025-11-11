@@ -356,7 +356,7 @@ router.get('/:id/pdf', async (req, res) => {
   }
 });
 
-// Generar facturas para todas las matrículas activas
+// Generar facturas para TODAS las matrículas activas
 router.post('/generar-masivo', async (req, res) => {
   try {
     const { periodo_facturacion, valor_base, dias_vencimiento = 15 } = req.body;
@@ -367,7 +367,7 @@ router.post('/generar-masivo', async (req, res) => {
       });
     }
 
-    // Obtener todas las matrículas activas
+    // Obtener TODAS las matrículas activas
     const { data: matriculas, error: matriculasError } = await supabase
       .from('matricula')
       .select('cod_matricula')
@@ -388,6 +388,7 @@ router.post('/generar-masivo', async (req, res) => {
     const facturasCreadas = [];
     const errores = [];
 
+    // Procesar TODAS las matrículas activas
     for (const matricula of matriculas) {
       try {
         // Verificar si ya existe factura para este periodo
@@ -406,40 +407,37 @@ router.post('/generar-masivo', async (req, res) => {
           continue;
         }
 
-        // Buscar facturas en mora (vencidas y no pagadas)
+        // Buscar facturas vencidas y no pagadas (mora acumulada)
         const { data: facturasEnMora } = await supabase
           .from('factura')
-          .select('*')
+          .select('id, valor, periodo_facturacion, fecha_vencimiento')
           .eq('cod_matricula', matricula.cod_matricula)
-          .in('estado', ['Pendiente', 'Vencida'])
+          .in('estado', ['Pendiente', 'Vencida', 'en_mora'])
           .lt('fecha_vencimiento', fecha_emision.toISOString().split('T')[0]);
 
-        let valor_mora = 0;
+        let valor_mora_acumulado = 0;
         let observaciones_mora = '';
 
+        // Calcular mora como suma acumulada de facturas no pagadas
         if (facturasEnMora && facturasEnMora.length > 0) {
-          // Calcular mora (3% por mes vencido)
-          const porcentaje_mora = 0.03;
-
           facturasEnMora.forEach(facturaMora => {
-            const fecha_venc = new Date(facturaMora.fecha_vencimiento);
-            const meses_mora = Math.ceil((fecha_emision - fecha_venc) / (1000 * 60 * 60 * 24 * 30));
-            const mora_factura = parseFloat(facturaMora.valor) * porcentaje_mora * meses_mora;
-            valor_mora += mora_factura;
-
-            observaciones_mora += `Factura ${facturaMora.id} en mora (${meses_mora} mes(es)): $${mora_factura.toFixed(2)}. `;
+            const valor_factura = parseFloat(facturaMora.valor);
+            valor_mora_acumulado += valor_factura;
+            
+            observaciones_mora += `Periodo ${facturaMora.periodo_facturacion}: $${valor_factura.toLocaleString()}. `;
           });
 
           // Actualizar estado de facturas en mora
           for (const facturaMora of facturasEnMora) {
             await supabase
               .from('factura')
-              .update({ estado: 'Vencida' })
+              .update({ estado: 'en_mora' })
               .eq('id', facturaMora.id);
           }
         }
 
-        const valor_total = parseFloat(valor_base) + valor_mora;
+        // Valor total = valor fijo base + mora acumulada
+        const valor_total = parseFloat(valor_base) + valor_mora_acumulado;
 
         // Crear nueva factura
         const { data: nuevaFactura, error: facturaError } = await supabase
@@ -452,7 +450,9 @@ router.post('/generar-masivo', async (req, res) => {
             valor: valor_total,
             estado: 'Pendiente',
             url: `facturas/${matricula.cod_matricula}_${periodo_facturacion}.pdf`,
-            observaciones: valor_mora > 0 ? `Incluye mora: $${valor_mora.toFixed(2)}. ${observaciones_mora}` : null
+            observaciones: valor_mora_acumulado > 0 
+              ? `Incluye mora acumulada: $${valor_mora_acumulado.toLocaleString()}. ${observaciones_mora}` 
+              : null
           }])
           .select()
           .single();
@@ -462,9 +462,10 @@ router.post('/generar-masivo', async (req, res) => {
         facturasCreadas.push({
           matricula: matricula.cod_matricula,
           id_factura: nuevaFactura.id,
-          valor_base: valor_base,
-          valor_mora: valor_mora,
-          valor_total: valor_total
+          valor_base: parseFloat(valor_base),
+          valor_mora: valor_mora_acumulado,
+          valor_total: valor_total,
+          facturas_en_mora: facturasEnMora ? facturasEnMora.length : 0
         });
 
       } catch (error) {
@@ -476,7 +477,8 @@ router.post('/generar-masivo', async (req, res) => {
     }
 
     res.status(201).json({
-      message: 'Proceso de facturación completado',
+      message: 'Proceso de facturación masiva completado',
+      total_matriculas: matriculas.length,
       facturas_creadas: facturasCreadas.length,
       errores: errores.length,
       detalle: {
