@@ -1,7 +1,23 @@
 import express from 'express';
+import multer from 'multer';
 import supabase from '../config/database.js';
 
 const router = express.Router();
+
+// Configurar multer para almacenar archivos en memoria
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024 // Límite de 5MB
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/pdf') {
+      cb(null, true);
+    } else {
+      cb(new Error('Solo se permiten archivos PDF'));
+    }
+  }
+});
 
 // Obtener todas las facturas
 router.get('/', async (req, res) => {
@@ -255,6 +271,88 @@ router.post('/:id/pago', async (req, res) => {
     res.status(201).json({ message: 'Pago registrado exitosamente' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Subir PDF a una factura
+router.post('/:id/pdf', upload.single('pdf'), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'No se proporcionó ningún archivo PDF' });
+    }
+
+    // Verificar que la factura existe
+    const { data: factura, error: facturaError } = await supabase
+      .from('factura')
+      .select('id')
+      .eq('id', id)
+      .single();
+
+    if (facturaError || !factura) {
+      return res.status(404).json({ error: 'Factura no encontrada' });
+    }
+
+    // Convertir el buffer a base64 para almacenar en PostgreSQL
+    const pdfBase64 = req.file.buffer.toString('base64');
+
+    // Actualizar la factura con el PDF
+    const { error: updateError } = await supabase
+      .from('factura')
+      .update({
+        pdf_documento: pdfBase64,
+        pdf_nombre: req.file.originalname,
+        pdf_tipo: req.file.mimetype
+      })
+      .eq('id', id);
+
+    if (updateError) throw updateError;
+
+    res.json({ 
+      message: 'PDF guardado exitosamente',
+      nombre: req.file.originalname,
+      tamaño: req.file.size
+    });
+
+  } catch (error) {
+    console.error('Error al guardar PDF:', error);
+    res.status(500).json({ error: error.message || 'Error al guardar el PDF' });
+  }
+});
+
+// Descargar PDF de una factura
+router.get('/:id/pdf', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data: factura, error } = await supabase
+      .from('factura')
+      .select('pdf_documento, pdf_nombre, pdf_tipo')
+      .eq('id', id)
+      .single();
+
+    if (error || !factura) {
+      return res.status(404).json({ error: 'Factura no encontrada' });
+    }
+
+    if (!factura.pdf_documento) {
+      return res.status(404).json({ error: 'Esta factura no tiene PDF asociado' });
+    }
+
+    // Convertir de base64 a buffer
+    const pdfBuffer = Buffer.from(factura.pdf_documento, 'base64');
+
+    // Configurar headers para descarga
+    res.setHeader('Content-Type', factura.pdf_tipo || 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${factura.pdf_nombre || 'factura.pdf'}"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+
+    res.send(pdfBuffer);
+
+  } catch (error) {
+    console.error('Error al descargar PDF:', error);
+    res.status(500).json({ error: error.message || 'Error al descargar el PDF' });
   }
 });
 
